@@ -1,5 +1,5 @@
 #define MyAppName "B2B Serv"
-#define MyAppVersion "0.3.0"
+#define MyAppVersion "0.3.1"
 #define MyAppPublisher "nutelex"
 #define MyAppExeName "B2B Serv.exe"
 

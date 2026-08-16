@@ -48,6 +48,8 @@ class B2BServApp:
         self.setup_hint_var = tk.StringVar(
             value="Mode VirtualDJ : active ton controleur ici, puis le receveur choisit la sortie MIDI recommandee."
         )
+        self.local_controller_var = tk.StringVar(value="Controleur local : aucun")
+        self.remote_controller_var = tk.StringVar(value="Controleur distant : inconnu")
 
         self.play_vars: dict[str, tk.StringVar] = {}
         self.volume_vars: dict[str, tk.DoubleVar] = {}
@@ -167,6 +169,8 @@ class B2BServApp:
         ttk.Button(midi_actions, text="Couper le MIDI", command=self.disable_midi).pack(side="left", padx=(8, 0))
         ttk.Label(midi_card, textvariable=self.midi_status_var, style="Muted.TLabel", wraplength=920).grid(row=5, column=0, columnspan=3, sticky="w", pady=(14, 0))
         ttk.Label(midi_card, textvariable=self.setup_hint_var, style="Muted.TLabel", wraplength=920).grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        ttk.Label(midi_card, textvariable=self.local_controller_var, style="Muted.TLabel", wraplength=920).grid(row=7, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        ttk.Label(midi_card, textvariable=self.remote_controller_var, style="Muted.TLabel", wraplength=920).grid(row=8, column=0, columnspan=3, sticky="w", pady=(4, 0))
 
         decks = ttk.Frame(outer)
         decks.pack(fill="both", expand=True, pady=(18, 0))
@@ -253,6 +257,7 @@ class B2BServApp:
         self.hero_var.set("Session ouverte")
         self.status_var.set("Partage le code ou le lien. Le tunnel est actif.")
         self.network_var.set(f"Tunnel public actif : {public_url}")
+        self._share_controller_name()
         self._log(f"Session creee par {username}")
         self._set_busy(False)
 
@@ -294,6 +299,7 @@ class B2BServApp:
         self.hero_var.set("Connexion en cours")
         self.status_var.set("Demande envoyee. En attente de validation.")
         self.network_var.set(f"Connexion au host via {relay_url}")
+        self.remote_controller_var.set("Controleur distant : en attente de connexion")
         self._log(f"{username} tente de rejoindre la session {code}")
 
     def copy_code(self) -> None:
@@ -351,11 +357,16 @@ class B2BServApp:
             self.status_var.set(f"Connecte avec {payload['name']}.")
             if self.profile_var.get() == "VirtualDJ":
                 self._auto_prepare_virtualdj_output()
+            self._share_controller_name()
             self._log(f"Session active avec {payload['name']}")
         elif event == "join_rejected":
             self.hero_var.set("Connexion refusee")
             self.status_var.set("L'hote a refuse la demande.")
             self._log("Connexion refusee par l'hote")
+        elif event == "remote_controller_name":
+            controller_name = payload["controller_name"] or "aucun"
+            self.remote_controller_var.set(f"Controleur distant : {controller_name}")
+            self._log(f"Controleur distant de {payload['name']} : {controller_name}")
         elif event == "remote_control":
             deck = payload["deck"]
             text = f"Action distante de {payload['name']}: {payload['control']} -> {payload['value']}"
@@ -546,6 +557,7 @@ class B2BServApp:
             self.midi_input_combo["values"] = []
             self.midi_output_combo["values"] = []
             self.midi_status_var.set("Support MIDI indisponible dans cette installation. Reinstalle la derniere mise a jour si besoin.")
+            self.local_controller_var.set("Controleur local : indisponible")
             return
         self.midi_input_combo["values"] = snapshot.inputs
         self.midi_output_combo["values"] = [""] + snapshot.outputs
@@ -558,8 +570,10 @@ class B2BServApp:
             self.midi_output_var.set(snapshot.outputs[0])
         if not snapshot.inputs:
             self.midi_status_var.set("Aucune entree MIDI detectee.")
+            self._update_local_controller_name("")
         else:
             self.midi_status_var.set(f"{len(snapshot.inputs)} entree(s) MIDI detectee(s).")
+            self._update_local_controller_name(self.midi_input_var.get().strip())
         if self.profile_var.get() == "VirtualDJ":
             recommended = self._find_virtualdj_output(snapshot.outputs)
             if recommended and not self.midi_output_var.get():
@@ -573,6 +587,8 @@ class B2BServApp:
         try:
             self.midi_bridge.start_input(port_name)
             self.midi_status_var.set(f"Controleur actif : {port_name}")
+            self._update_local_controller_name(port_name)
+            self._share_controller_name()
             self._log(f"Capture MIDI active sur {port_name}")
         except Exception as exc:
             self.midi_status_var.set("Impossible d'activer le controleur.")
@@ -590,6 +606,8 @@ class B2BServApp:
     def disable_midi(self) -> None:
         self.midi_bridge.shutdown()
         self.midi_status_var.set("MIDI coupe.")
+        self._update_local_controller_name("")
+        self._share_controller_name()
         self._log("Pont MIDI coupe")
 
     def _on_local_midi_message(self, message: dict) -> None:
@@ -683,6 +701,14 @@ class B2BServApp:
             return direct_match.group(1).strip().rstrip("/")
         return raw_link.strip()
 
+    def _update_local_controller_name(self, port_name: str) -> None:
+        controller_name = port_name or "aucun"
+        self.local_controller_var.set(f"Controleur local : {controller_name}")
+
+    def _share_controller_name(self) -> None:
+        controller_name = self.midi_input_var.get().strip() or "aucun"
+        self.engine.send_controller_name(controller_name)
+
     def _parse_link(self, link: str) -> tuple[str, int, str]:
         parsed = urlparse(link)
         query = parse_qs(parsed.query)
@@ -695,6 +721,8 @@ class B2BServApp:
     def _cleanup_host_stack(self) -> None:
         self.engine.stop()
         self.midi_bridge.shutdown()
+        self.local_controller_var.set("Controleur local : aucun")
+        self.remote_controller_var.set("Controleur distant : inconnu")
         self.tunnel.stop()
         if self.local_relay:
             self.local_relay.stop()

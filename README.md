@@ -21,6 +21,7 @@ Repo GitHub : `https://github.com/nutelex/B2B-Server`
 - le mode `MIDI universel` transmet maintenant les messages MIDI standard du controleur entre les deux PC
 - le profil `VirtualDJ` reduit la configuration avec une sortie MIDI recommandee et un assistant integre
 - les liens de session mal copies sont maintenant nettoyes automatiquement au collage
+- l'application affiche maintenant le controleur detecte localement et celui detecte chez l'autre DJ
 
 ## Lancer en developpement
 

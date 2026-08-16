@@ -86,6 +86,21 @@ class SessionEngine:
             },
         )
 
+    def send_controller_name(self, controller_name: str) -> None:
+        if not self.running or not self.code:
+            return
+        self._post(
+            "/control",
+            {
+                "code": self.code,
+                "role": self.role,
+                "event": {
+                    "from": self.sender_name,
+                    "controller_name": controller_name,
+                },
+            },
+        )
+
     def stop(self) -> None:
         self.running = False
         self.peer_name = ""
@@ -119,7 +134,15 @@ class SessionEngine:
         elif kind == "join_rejected":
             self.on_event("join_rejected", {})
         elif kind == "remote_control":
-            if "midi" in payload:
+            if "controller_name" in payload:
+                self.on_event(
+                    "remote_controller_name",
+                    {
+                        "name": payload.get("from", "Remote DJ"),
+                        "controller_name": payload["controller_name"],
+                    },
+                )
+            elif "midi" in payload:
                 self.on_event(
                     "remote_midi",
                     {
