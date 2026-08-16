@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import threading
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
@@ -40,9 +41,13 @@ class B2BServApp:
         self.status_var = tk.StringVar(value="Choisis une action pour commencer.")
         self.hero_var = tk.StringVar(value=f"Session inactive - v{__version__}")
         self.network_var = tk.StringVar(value="Le host cree automatiquement son serveur et son tunnel.")
+        self.profile_var = tk.StringVar(value="VirtualDJ")
         self.midi_input_var = tk.StringVar(value="")
         self.midi_output_var = tk.StringVar(value="")
         self.midi_status_var = tk.StringVar(value="MIDI inactif.")
+        self.setup_hint_var = tk.StringVar(
+            value="Mode VirtualDJ : active ton controleur ici, puis le receveur choisit la sortie MIDI recommandee."
+        )
 
         self.play_vars: dict[str, tk.StringVar] = {}
         self.volume_vars: dict[str, tk.DoubleVar] = {}
@@ -117,6 +122,10 @@ class B2BServApp:
             style="Muted.TLabel",
             font=("Segoe UI", 10),
         ).pack(anchor="w", pady=(16, 0))
+        setup_actions = ttk.Frame(action_card, style="Panel.TFrame")
+        setup_actions.pack(anchor="w", pady=(12, 0))
+        ttk.Button(setup_actions, text="Assistant VirtualDJ", command=self.open_virtualdj_guide).pack(side="left")
+        ttk.Button(setup_actions, text="Optimiser VirtualDJ", command=self.optimize_for_virtualdj).pack(side="left", padx=(8, 0))
 
         session_card = ttk.Frame(top, style="Panel.TFrame", padding=22)
         session_card.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
@@ -142,17 +151,22 @@ class B2BServApp:
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 14))
         ttk.Label(midi_card, text="Entree controleur", style="Muted.TLabel").grid(row=2, column=0, sticky="w")
         ttk.Label(midi_card, text="Sortie distante", style="Muted.TLabel").grid(row=2, column=1, sticky="w")
+        ttk.Label(midi_card, text="Profil logiciel", style="Muted.TLabel").grid(row=2, column=2, sticky="w", padx=(8, 0))
         self.midi_input_combo = ttk.Combobox(midi_card, textvariable=self.midi_input_var, state="readonly")
         self.midi_input_combo.grid(row=3, column=0, sticky="ew", padx=(0, 8))
         self.midi_output_combo = ttk.Combobox(midi_card, textvariable=self.midi_output_var, state="readonly")
         self.midi_output_combo.grid(row=3, column=1, sticky="ew", padx=(8, 0))
+        profile_combo = ttk.Combobox(midi_card, textvariable=self.profile_var, state="readonly", values=["VirtualDJ"])
+        profile_combo.grid(row=3, column=2, sticky="ew", padx=(8, 0))
+        midi_card.columnconfigure(2, weight=0)
         midi_actions = ttk.Frame(midi_card, style="Panel.TFrame")
-        midi_actions.grid(row=4, column=0, columnspan=2, sticky="w", pady=(12, 0))
+        midi_actions.grid(row=4, column=0, columnspan=3, sticky="w", pady=(12, 0))
         ttk.Button(midi_actions, text="Rafraichir les ports", command=self.refresh_midi_ports).pack(side="left")
         ttk.Button(midi_actions, text="Activer le controleur", command=self.activate_midi).pack(side="left", padx=(8, 0))
         ttk.Button(midi_actions, text="Appliquer la sortie distante", command=self.apply_midi_output).pack(side="left", padx=(8, 0))
         ttk.Button(midi_actions, text="Couper le MIDI", command=self.disable_midi).pack(side="left", padx=(8, 0))
-        ttk.Label(midi_card, textvariable=self.midi_status_var, style="Muted.TLabel", wraplength=920).grid(row=5, column=0, columnspan=2, sticky="w", pady=(14, 0))
+        ttk.Label(midi_card, textvariable=self.midi_status_var, style="Muted.TLabel", wraplength=920).grid(row=5, column=0, columnspan=3, sticky="w", pady=(14, 0))
+        ttk.Label(midi_card, textvariable=self.setup_hint_var, style="Muted.TLabel", wraplength=920).grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
 
         decks = ttk.Frame(outer)
         decks.pack(fill="both", expand=True, pady=(18, 0))
@@ -177,6 +191,7 @@ class B2BServApp:
         self.log_text.pack(fill="both", expand=True, pady=(12, 0))
         self.log_text.configure(state="disabled")
         self.refresh_midi_ports()
+        self.optimize_for_virtualdj(initial=True)
 
     def _build_deck_panel(self, parent: ttk.Frame, deck: str, column: int) -> None:
         card = ttk.Frame(parent, style="Panel.TFrame", padding=20)
@@ -265,7 +280,8 @@ class B2BServApp:
             messagebox.showerror("Lien requis", "Pour ce mode auto-tunnel, il faut coller le lien complet du host.")
             return
 
-        relay_url, _, code = self._parse_link(value.strip())
+        cleaned_link = self._sanitize_link(value.strip())
+        relay_url, _, code = self._parse_link(cleaned_link)
         try:
             self.engine.join_session(username, relay_url, code)
         except Exception as exc:
@@ -274,7 +290,7 @@ class B2BServApp:
             return
 
         self.code_var.set(code)
-        self.link_var.set(value.strip())
+        self.link_var.set(cleaned_link)
         self.hero_var.set("Connexion en cours")
         self.status_var.set("Demande envoyee. En attente de validation.")
         self.network_var.set(f"Connexion au host via {relay_url}")
@@ -333,6 +349,8 @@ class B2BServApp:
         elif event == "peer_connected":
             self.hero_var.set("Session connectee")
             self.status_var.set(f"Connecte avec {payload['name']}.")
+            if self.profile_var.get() == "VirtualDJ":
+                self._auto_prepare_virtualdj_output()
             self._log(f"Session active avec {payload['name']}")
         elif event == "join_rejected":
             self.hero_var.set("Connexion refusee")
@@ -489,6 +507,39 @@ class B2BServApp:
         self.root.clipboard_append(logs)
         self.status_var.set("Logs copies dans le presse-papiers.")
 
+    def optimize_for_virtualdj(self, initial: bool = False) -> None:
+        self.profile_var.set("VirtualDJ")
+        self.refresh_midi_ports()
+        recommended = self._find_virtualdj_output()
+        if recommended:
+            self.midi_output_var.set(recommended)
+            self._try_apply_midi_output(recommended, quiet=True)
+            hint = (
+                f"Mode VirtualDJ pret. Sur le PC receveur, laisse la sortie distante sur '{recommended}' "
+                "et active ce meme port dans les controleurs de VirtualDJ."
+            )
+        else:
+            hint = (
+                "Mode VirtualDJ actif. Si aucun port virtuel n'apparait, cree ou active un port MIDI Windows "
+                "puis choisis-le dans 'Sortie distante'."
+            )
+        self.setup_hint_var.set(hint)
+        if not initial:
+            self.status_var.set("Profil VirtualDJ applique.")
+            self._log("Profil VirtualDJ applique")
+
+    def open_virtualdj_guide(self) -> None:
+        messagebox.showinfo(
+            "Assistant VirtualDJ",
+            "1. Sur le PC qui a la vraie platine, clique sur 'Activer le controleur'.\n\n"
+            "2. Sur le PC receveur, clique sur 'Optimiser VirtualDJ', puis laisse la 'Sortie distante' recommandee.\n\n"
+            "3. Dans VirtualDJ, ouvre Parametres > Controleurs et active ce port MIDI comme controleur d'entree.\n\n"
+            "4. Si VirtualDJ ne voit aucun port MIDI, il faudra un port MIDI virtuel Windows. "
+            "B2B Serv enverra alors les commandes dessus.\n\n"
+            "5. Le nom exact de ta platine distante n'apparaitra pas comme USB natif. "
+            "VirtualDJ verra une entree MIDI de controle.",
+        )
+
     def refresh_midi_ports(self) -> None:
         snapshot = self.midi_bridge.list_ports()
         if not self.midi_bridge.available:
@@ -498,7 +549,10 @@ class B2BServApp:
             return
         self.midi_input_combo["values"] = snapshot.inputs
         self.midi_output_combo["values"] = [""] + snapshot.outputs
-        if snapshot.inputs and not self.midi_input_var.get():
+        recommended_input = self._find_preferred_input(snapshot.inputs)
+        if recommended_input:
+            self.midi_input_var.set(recommended_input)
+        elif snapshot.inputs and not self.midi_input_var.get():
             self.midi_input_var.set(snapshot.inputs[0])
         if snapshot.outputs and not self.midi_output_var.get():
             self.midi_output_var.set(snapshot.outputs[0])
@@ -506,6 +560,10 @@ class B2BServApp:
             self.midi_status_var.set("Aucune entree MIDI detectee.")
         else:
             self.midi_status_var.set(f"{len(snapshot.inputs)} entree(s) MIDI detectee(s).")
+        if self.profile_var.get() == "VirtualDJ":
+            recommended = self._find_virtualdj_output(snapshot.outputs)
+            if recommended and not self.midi_output_var.get():
+                self.midi_output_var.set(recommended)
 
     def activate_midi(self) -> None:
         port_name = self.midi_input_var.get().strip()
@@ -524,13 +582,7 @@ class B2BServApp:
     def apply_midi_output(self) -> None:
         port_name = self.midi_output_var.get().strip()
         try:
-            self.midi_bridge.set_output(port_name)
-            if port_name:
-                self.midi_status_var.set(f"Sortie distante active : {port_name}")
-                self._log(f"Sortie MIDI distante active sur {port_name}")
-            else:
-                self.midi_status_var.set("Sortie distante desactivee.")
-                self._log("Sortie MIDI distante desactivee")
+            self._try_apply_midi_output(port_name)
         except Exception as exc:
             self._log(f"Echec sortie MIDI: {exc}")
             messagebox.showerror("Sortie MIDI impossible", str(exc))
@@ -563,6 +615,73 @@ class B2BServApp:
             if key in message:
                 parts.append(f"{key}={message[key]}")
         return ", ".join(parts)
+
+    def _find_virtualdj_output(self, outputs: list[str] | None = None) -> str:
+        output_names = outputs if outputs is not None else list(self.midi_output_combo.cget("values"))
+        if not output_names:
+            return ""
+        preferred_tokens = [
+            "loopmidi",
+            "virtual",
+            "loopbe",
+            "b2b",
+            "midi",
+        ]
+        for token in preferred_tokens:
+            for name in output_names:
+                if name and token in name.lower():
+                    return name
+        for name in output_names:
+            if name:
+                return name
+        return ""
+
+    def _find_preferred_input(self, inputs: list[str]) -> str:
+        preferred_tokens = [
+            "hercules",
+            "impulse",
+            "inpulse",
+            "numark",
+            "ns4fx",
+            "ddj",
+            "traktor",
+            "midi",
+        ]
+        for token in preferred_tokens:
+            for name in inputs:
+                if token in name.lower():
+                    return name
+        return ""
+
+    def _try_apply_midi_output(self, port_name: str, quiet: bool = False) -> None:
+        self.midi_bridge.set_output(port_name)
+        if port_name:
+            self.midi_status_var.set(f"Sortie distante active : {port_name}")
+            self._log(f"Sortie MIDI distante active sur {port_name}")
+        else:
+            self.midi_status_var.set("Sortie distante desactivee.")
+            self._log("Sortie MIDI distante desactivee")
+        if not quiet:
+            self.status_var.set("Sortie MIDI appliquee.")
+
+    def _auto_prepare_virtualdj_output(self) -> None:
+        recommended = self._find_virtualdj_output()
+        if not recommended:
+            return
+        self.midi_output_var.set(recommended)
+        try:
+            self._try_apply_midi_output(recommended, quiet=True)
+        except Exception as exc:
+            self._log(f"Auto-config VirtualDJ impossible: {exc}")
+
+    def _sanitize_link(self, raw_link: str) -> str:
+        markdown_match = re.search(r"\((b2bserv://[^)]+)\)", raw_link)
+        if markdown_match:
+            return markdown_match.group(1).strip()
+        direct_match = re.search(r"(b2bserv://\S+)", raw_link)
+        if direct_match:
+            return direct_match.group(1).strip().rstrip("/")
+        return raw_link.strip()
 
     def _parse_link(self, link: str) -> tuple[str, int, str]:
         parsed = urlparse(link)

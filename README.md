@@ -19,6 +19,8 @@ Repo GitHub : `https://github.com/nutelex/B2B-Server`
 - si une nouvelle version est disponible, elle peut telecharger et lancer automatiquement `Installer.exe`
 - les builds Windows et l'installateur sont prepares automatiquement par GitHub Actions
 - le mode `MIDI universel` transmet maintenant les messages MIDI standard du controleur entre les deux PC
+- le profil `VirtualDJ` reduit la configuration avec une sortie MIDI recommandee et un assistant integre
+- les liens de session mal copies sont maintenant nettoyes automatiquement au collage
 
 ## Lancer en developpement
 
