@@ -4,12 +4,15 @@ import threading
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 from urllib.parse import parse_qs, urlparse
+import webbrowser
 
 from relay_server import LocalRelayServer
 
 from .models import SessionState
 from .network import SessionEngine
 from .tunnel import CloudflaredTunnel
+from .updater import check_for_update
+from .version import __version__
 
 LOCAL_RELAY_HOST = "127.0.0.1"
 LOCAL_RELAY_PORT = 47000
@@ -32,7 +35,7 @@ class B2BServApp:
         self.code_var = tk.StringVar(value="------")
         self.link_var = tk.StringVar(value="Le lien apparaitra ici")
         self.status_var = tk.StringVar(value="Choisis une action pour commencer.")
-        self.hero_var = tk.StringVar(value="Session inactive")
+        self.hero_var = tk.StringVar(value=f"Session inactive - v{__version__}")
         self.network_var = tk.StringVar(value="Le host cree automatiquement son serveur et son tunnel.")
 
         self.play_vars: dict[str, tk.StringVar] = {}
@@ -43,6 +46,7 @@ class B2BServApp:
         self.join_button: ttk.Button
 
         self._build_ui()
+        self.root.after(1200, self._check_updates_async)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _build_ui(self) -> None:
@@ -303,6 +307,23 @@ class B2BServApp:
             self.status_var.set("Impossible de maintenir la connexion.")
             self.network_var.set("La session reseau a rencontre une erreur.")
             self._log(payload["message"])
+
+    def _check_updates_async(self) -> None:
+        threading.Thread(target=self._check_updates_worker, daemon=True).start()
+
+    def _check_updates_worker(self) -> None:
+        update = check_for_update()
+        if update:
+            self.root.after(0, lambda: self._show_update_notice(update))
+
+    def _show_update_notice(self, update: dict) -> None:
+        self.network_var.set(f"Nouvelle version disponible : {update['latest_version']}")
+        should_open = messagebox.askyesno(
+            "Mise a jour disponible",
+            f"Une nouvelle version ({update['latest_version']}) est disponible.\nOuvrir la page de telechargement ?",
+        )
+        if should_open:
+            webbrowser.open(update["html_url"])
 
     def _set_busy(self, busy: bool) -> None:
         self.is_busy = busy

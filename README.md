@@ -2,16 +2,22 @@
 
 Application desktop Windows pour sessions B2B DJ a distance en mode `host auto + tunnel automatique`.
 
-## Usage utilisateur
+Repo GitHub : `https://github.com/nutelex/B2B-Server`
 
-1. Le host lance l'app
-2. Il clique sur `Creer une session`
-3. L'app demarre automatiquement un relais local
-4. L'app ouvre automatiquement un tunnel public via `cloudflared`
-5. Le host partage le lien genere
-6. Le guest lance l'app et clique sur `Rejoindre une session`
-7. Le guest colle le lien complet
-8. Le host accepte la demande
+## Pour l'utilisateur final
+
+1. Installer l'application
+2. Le host clique sur `Creer une session`
+3. Il partage le lien genere
+4. Le guest clique sur `Rejoindre une session`
+5. Il colle le lien
+6. Le host accepte la demande
+
+## Mises a jour
+
+- l'application verifie au demarrage si une nouvelle release GitHub existe
+- si une nouvelle version est disponible, elle propose d'ouvrir la page de telechargement
+- les builds Windows sont prepares automatiquement par GitHub Actions
 
 ## Lancer en developpement
 
@@ -33,11 +39,21 @@ ou
 
 Le build PyInstaller genere un dossier exportable dans `dist\B2B Serv`.
 
-## Contenu de l'export
+## Release GitHub
 
-- `B2B Serv.exe`
-- `cloudflared.exe` embarque automatiquement
-- toutes les ressources Python necessaires
+Le workflow [release.yml](C:\Users\FLOWUP\Desktop\bot_sf1x\B2B%20Serv\.github\workflows\release.yml) :
+
+- build l'application Windows
+- embarque `cloudflared.exe`
+- cree une archive `.zip`
+- publie automatiquement la release quand tu pousses un tag `v*`
+
+Exemple :
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
 
 ## Architecture
 
@@ -46,21 +62,21 @@ Le build PyInstaller genere un dossier exportable dans `dist\B2B Serv`.
 - [relay_server.py](C:\Users\FLOWUP\Desktop\bot_sf1x\B2B%20Serv\relay_server.py) : relais local du host
 - [b2b_serv/network.py](C:\Users\FLOWUP\Desktop\bot_sf1x\B2B%20Serv\b2b_serv\network.py) : client HTTP de session
 - [b2b_serv/tunnel.py](C:\Users\FLOWUP\Desktop\bot_sf1x\B2B%20Serv\b2b_serv\tunnel.py) : tunnel `cloudflared`
-- [build.ps1](C:\Users\FLOWUP\Desktop\bot_sf1x\B2B%20Serv\build.ps1) : script d'export Windows
+- [b2b_serv/updater.py](C:\Users\FLOWUP\Desktop\bot_sf1x\B2B%20Serv\b2b_serv\updater.py) : verification des nouvelles releases
+- [b2b_serv/version.py](C:\Users\FLOWUP\Desktop\bot_sf1x\B2B%20Serv\b2b_serv\version.py) : version de l'application
 
 ## Etat actuel
 
-Cette version est prete pour export desktop et demo utilisateur.
+Cette version est prete pour :
+
+- repo GitHub separe
+- push du code
+- build Windows local
+- release GitHub automatisee
+- verification de mise a jour au lancement
 
 Limites restantes :
 
-- transport HTTP avec polling, pas encore optimise latence extreme
-- simulation des commandes, pas encore injection MIDI/HID reelle dans les logiciels DJ
-- pas encore d'installateur `.msi` ou `.exe setup`
-
-## Etape suivante recommande
-
-1. passer du polling HTTP a WebSocket ou QUIC
-2. brancher la vraie capture MIDI/HID
-3. injecter dans un port MIDI virtuel Windows
-4. creer un vrai installateur
+- transport HTTP avec polling
+- pas encore de vrai passthrough MIDI/HID vers Serato, rekordbox, Traktor ou VirtualDJ
+- pas encore d'installateur Windows complet type Inno Setup ou MSI
