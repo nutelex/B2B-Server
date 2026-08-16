@@ -18,6 +18,7 @@ Repo GitHub : `https://github.com/nutelex/B2B-Server`
 - l'application verifie au demarrage si une nouvelle release GitHub existe
 - si une nouvelle version est disponible, elle peut telecharger et lancer automatiquement `Installer.exe`
 - les builds Windows et l'installateur sont prepares automatiquement par GitHub Actions
+- le mode `MIDI universel` transmet maintenant les messages MIDI standard du controleur entre les deux PC
 
 ## Lancer en developpement
 
@@ -77,9 +78,10 @@ Cette version est prete pour :
 - verification de mise a jour au lancement
 - installateur Windows telechargeable
 - mise a jour qui lance automatiquement l'installateur
+- capture MIDI standard et retransmission brute entre les deux PC
 
 Limites restantes :
 
 - transport HTTP avec polling
-- pas encore de vrai passthrough MIDI/HID vers Serato, rekordbox, Traktor ou VirtualDJ
+- les fonctions purement proprietaires ou HID ne sont pas garanties, seules les commandes exposees en MIDI standard peuvent etre transmises universellement
 - pas encore de mise a jour delta ou silencieuse sans relancer l'installateur

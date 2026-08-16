@@ -28,6 +28,9 @@ $args = @(
     "--name", "B2B Serv",
     "--icon", "app-icon.ico",
     "--add-binary", "$cloudflared;.",
+    "--hidden-import", "mido",
+    "--hidden-import", "rtmidi",
+    "--hidden-import", "mido.backends.rtmidi",
     "main.py"
 )
 

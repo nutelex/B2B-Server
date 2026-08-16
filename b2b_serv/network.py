@@ -71,6 +71,21 @@ class SessionEngine:
             },
         )
 
+    def send_midi(self, message: dict) -> None:
+        if not self.running or not self.code:
+            return
+        self._post(
+            "/control",
+            {
+                "code": self.code,
+                "role": self.role,
+                "event": {
+                    "from": self.sender_name,
+                    "midi": message,
+                },
+            },
+        )
+
     def stop(self) -> None:
         self.running = False
         self.peer_name = ""
@@ -104,15 +119,24 @@ class SessionEngine:
         elif kind == "join_rejected":
             self.on_event("join_rejected", {})
         elif kind == "remote_control":
-            self.on_event(
-                "remote_control",
-                {
-                    "name": payload.get("from", "Remote DJ"),
-                    "deck": payload["deck"],
-                    "control": payload["control"],
-                    "value": payload["value"],
-                },
-            )
+            if "midi" in payload:
+                self.on_event(
+                    "remote_midi",
+                    {
+                        "name": payload.get("from", "Remote DJ"),
+                        "message": payload["midi"],
+                    },
+                )
+            else:
+                self.on_event(
+                    "remote_control",
+                    {
+                        "name": payload.get("from", "Remote DJ"),
+                        "deck": payload["deck"],
+                        "control": payload["control"],
+                        "value": payload["value"],
+                    },
+                )
 
     def _post(self, path: str, payload: dict) -> dict:
         data = json.dumps(payload).encode("utf-8")

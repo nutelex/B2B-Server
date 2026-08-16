@@ -8,6 +8,7 @@ from urllib.parse import parse_qs, urlparse
 from relay_server import LocalRelayServer
 
 from .logging_utils import append_log, log_file_path, read_logs
+from .midi_bridge import MidiBridge
 from .models import SessionState
 from .network import SessionEngine
 from .runtime import launch_uninstaller
@@ -28,6 +29,7 @@ class B2BServApp:
 
         self.state = SessionState()
         self.engine = SessionEngine(self._handle_event)
+        self.midi_bridge = MidiBridge(self._on_local_midi_message, self._on_midi_status)
         self.local_relay: LocalRelayServer | None = None
         self.tunnel = CloudflaredTunnel(self._log_tunnel)
         self.is_busy = False
@@ -38,10 +40,15 @@ class B2BServApp:
         self.status_var = tk.StringVar(value="Choisis une action pour commencer.")
         self.hero_var = tk.StringVar(value=f"Session inactive - v{__version__}")
         self.network_var = tk.StringVar(value="Le host cree automatiquement son serveur et son tunnel.")
+        self.midi_input_var = tk.StringVar(value="")
+        self.midi_output_var = tk.StringVar(value="")
+        self.midi_status_var = tk.StringVar(value="MIDI inactif.")
 
         self.play_vars: dict[str, tk.StringVar] = {}
         self.volume_vars: dict[str, tk.DoubleVar] = {}
         self.remote_status_vars: dict[str, tk.StringVar] = {}
+        self.midi_input_combo: ttk.Combobox
+        self.midi_output_combo: ttk.Combobox
         self.log_text: tk.Text
         self.create_button: ttk.Button
         self.join_button: ttk.Button
@@ -123,6 +130,30 @@ class B2BServApp:
         ttk.Button(quick, text="Copier le code", command=self.copy_code).pack(side="left")
         ttk.Button(quick, text="Copier le lien", command=self.copy_link).pack(side="left", padx=(8, 0))
 
+        midi_card = ttk.Frame(outer, style="Panel.TFrame", padding=22)
+        midi_card.pack(fill="x", pady=(18, 0))
+        midi_card.columnconfigure(0, weight=1)
+        midi_card.columnconfigure(1, weight=1)
+        ttk.Label(midi_card, text="Controleur MIDI universel", style="Panel.TLabel", font=("Segoe UI", 14, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            midi_card,
+            text="Branche ton controleur, active l'entree MIDI, puis choisis une sortie distante si ton logiciel ecoute un port MIDI.",
+            style="Muted.TLabel",
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 14))
+        ttk.Label(midi_card, text="Entree controleur", style="Muted.TLabel").grid(row=2, column=0, sticky="w")
+        ttk.Label(midi_card, text="Sortie distante", style="Muted.TLabel").grid(row=2, column=1, sticky="w")
+        self.midi_input_combo = ttk.Combobox(midi_card, textvariable=self.midi_input_var, state="readonly")
+        self.midi_input_combo.grid(row=3, column=0, sticky="ew", padx=(0, 8))
+        self.midi_output_combo = ttk.Combobox(midi_card, textvariable=self.midi_output_var, state="readonly")
+        self.midi_output_combo.grid(row=3, column=1, sticky="ew", padx=(8, 0))
+        midi_actions = ttk.Frame(midi_card, style="Panel.TFrame")
+        midi_actions.grid(row=4, column=0, columnspan=2, sticky="w", pady=(12, 0))
+        ttk.Button(midi_actions, text="Rafraichir les ports", command=self.refresh_midi_ports).pack(side="left")
+        ttk.Button(midi_actions, text="Activer le controleur", command=self.activate_midi).pack(side="left", padx=(8, 0))
+        ttk.Button(midi_actions, text="Appliquer la sortie distante", command=self.apply_midi_output).pack(side="left", padx=(8, 0))
+        ttk.Button(midi_actions, text="Couper le MIDI", command=self.disable_midi).pack(side="left", padx=(8, 0))
+        ttk.Label(midi_card, textvariable=self.midi_status_var, style="Muted.TLabel", wraplength=920).grid(row=5, column=0, columnspan=2, sticky="w", pady=(14, 0))
+
         decks = ttk.Frame(outer)
         decks.pack(fill="both", expand=True, pady=(18, 0))
         decks.columnconfigure(0, weight=1)
@@ -145,6 +176,7 @@ class B2BServApp:
         )
         self.log_text.pack(fill="both", expand=True, pady=(12, 0))
         self.log_text.configure(state="disabled")
+        self.refresh_midi_ports()
 
     def _build_deck_panel(self, parent: ttk.Frame, deck: str, column: int) -> None:
         card = ttk.Frame(parent, style="Panel.TFrame", padding=20)
@@ -316,6 +348,12 @@ class B2BServApp:
             elif payload["control"] == "volume":
                 self.volume_vars[deck].set(payload["value"])
             self._log(f"Remote {deck}: {payload['control']} -> {payload['value']}")
+        elif event == "remote_midi":
+            message = payload["message"]
+            self.midi_bridge.send_remote_message(message)
+            summary = self._format_midi_message(message)
+            self.midi_status_var.set(f"MIDI distant recu de {payload['name']} : {summary}")
+            self._log(f"MIDI distant {payload['name']}: {summary}")
         elif event == "connection_error":
             self.hero_var.set("Erreur reseau")
             self.status_var.set("Impossible de maintenir la connexion.")
@@ -451,6 +489,81 @@ class B2BServApp:
         self.root.clipboard_append(logs)
         self.status_var.set("Logs copies dans le presse-papiers.")
 
+    def refresh_midi_ports(self) -> None:
+        snapshot = self.midi_bridge.list_ports()
+        if not self.midi_bridge.available:
+            self.midi_input_combo["values"] = []
+            self.midi_output_combo["values"] = []
+            self.midi_status_var.set("Support MIDI indisponible dans cette installation. Reinstalle la derniere mise a jour si besoin.")
+            return
+        self.midi_input_combo["values"] = snapshot.inputs
+        self.midi_output_combo["values"] = [""] + snapshot.outputs
+        if snapshot.inputs and not self.midi_input_var.get():
+            self.midi_input_var.set(snapshot.inputs[0])
+        if snapshot.outputs and not self.midi_output_var.get():
+            self.midi_output_var.set(snapshot.outputs[0])
+        if not snapshot.inputs:
+            self.midi_status_var.set("Aucune entree MIDI detectee.")
+        else:
+            self.midi_status_var.set(f"{len(snapshot.inputs)} entree(s) MIDI detectee(s).")
+
+    def activate_midi(self) -> None:
+        port_name = self.midi_input_var.get().strip()
+        if not port_name:
+            messagebox.showerror("Controleur requis", "Choisis une entree MIDI pour activer le controleur.")
+            return
+        try:
+            self.midi_bridge.start_input(port_name)
+            self.midi_status_var.set(f"Controleur actif : {port_name}")
+            self._log(f"Capture MIDI active sur {port_name}")
+        except Exception as exc:
+            self.midi_status_var.set("Impossible d'activer le controleur.")
+            self._log(f"Echec activation MIDI: {exc}")
+            messagebox.showerror("MIDI indisponible", str(exc))
+
+    def apply_midi_output(self) -> None:
+        port_name = self.midi_output_var.get().strip()
+        try:
+            self.midi_bridge.set_output(port_name)
+            if port_name:
+                self.midi_status_var.set(f"Sortie distante active : {port_name}")
+                self._log(f"Sortie MIDI distante active sur {port_name}")
+            else:
+                self.midi_status_var.set("Sortie distante desactivee.")
+                self._log("Sortie MIDI distante desactivee")
+        except Exception as exc:
+            self._log(f"Echec sortie MIDI: {exc}")
+            messagebox.showerror("Sortie MIDI impossible", str(exc))
+
+    def disable_midi(self) -> None:
+        self.midi_bridge.shutdown()
+        self.midi_status_var.set("MIDI coupe.")
+        self._log("Pont MIDI coupe")
+
+    def _on_local_midi_message(self, message: dict) -> None:
+        self.engine.send_midi(message)
+        self.root.after(0, lambda: self._update_local_midi_status(message))
+
+    def _update_local_midi_status(self, message: dict) -> None:
+        summary = self._format_midi_message(message)
+        self.midi_status_var.set(f"Message local envoye : {summary}")
+        self._log(f"MIDI local: {summary}")
+
+    def _on_midi_status(self, message: str) -> None:
+        self.root.after(0, lambda: self._apply_midi_status(message))
+
+    def _apply_midi_status(self, message: str) -> None:
+        self.midi_status_var.set(message)
+        self._log(message)
+
+    def _format_midi_message(self, message: dict) -> str:
+        message_type = message.get("type", "unknown")
+        parts = [message_type]
+        for key in ("channel", "note", "velocity", "control", "value", "program", "pitch"):
+            if key in message:
+                parts.append(f"{key}={message[key]}")
+        return ", ".join(parts)
+
     def _parse_link(self, link: str) -> tuple[str, int, str]:
         parsed = urlparse(link)
         query = parse_qs(parsed.query)
@@ -462,6 +575,7 @@ class B2BServApp:
 
     def _cleanup_host_stack(self) -> None:
         self.engine.stop()
+        self.midi_bridge.shutdown()
         self.tunnel.stop()
         if self.local_relay:
             self.local_relay.stop()
