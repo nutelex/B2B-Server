@@ -17,14 +17,20 @@ if (Test-Path $buildDir) {
     Remove-Item -Recurse -Force $buildDir
 }
 
-pyinstaller `
-    --noconfirm `
-    --windowed `
-    --name "B2B Serv" `
-    --icon "app-icon.ico" `
-    --add-binary "$cloudflared;." `
-    --add-data "$tclRoot;tcl" `
-    main.py
+$args = @(
+    "--noconfirm",
+    "--windowed",
+    "--name", "B2B Serv",
+    "--icon", "app-icon.ico",
+    "--add-binary", "$cloudflared;.",
+    "main.py"
+)
+
+if (Test-Path $tclRoot) {
+    $args += @("--add-data", "$tclRoot;tcl")
+}
+
+pyinstaller @args
 
 Write-Host ""
 Write-Host "Export termine dans:" (Join-Path $distDir "B2B Serv")
