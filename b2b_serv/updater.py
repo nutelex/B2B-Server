@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 from urllib import error, request
@@ -67,6 +68,9 @@ def download_and_launch_update(installer_url: str, installer_name: str) -> Path:
     temp_dir.mkdir(parents=True, exist_ok=True)
     target = temp_dir / (installer_name or "B2B-Serv-Installer.exe")
     helper = temp_dir / "run_update.ps1"
+    ready_flag = temp_dir / "update_ready.flag"
+    if ready_flag.exists():
+        ready_flag.unlink()
 
     req = request.Request(
         installer_url,
@@ -81,13 +85,14 @@ def download_and_launch_update(installer_url: str, installer_name: str) -> Path:
 
     restart_target = Path(sys.executable).resolve()
     helper.write_text(
-        _build_update_helper_script(target, restart_target),
+        _build_update_helper_script(target, restart_target, ready_flag),
         encoding="utf-8",
     )
 
-    subprocess.Popen(
+    process = subprocess.Popen(
         [
             "powershell.exe",
+            "-Sta",
             "-ExecutionPolicy",
             "Bypass",
             "-File",
@@ -97,6 +102,7 @@ def download_and_launch_update(installer_url: str, installer_name: str) -> Path:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+    _wait_for_ready_flag(ready_flag, process)
     return target
 
 
@@ -108,12 +114,15 @@ def _find_installer_asset(assets: list[dict[str, Any]]) -> dict[str, Any] | None
     return None
 
 
-def _build_update_helper_script(installer_path: Path, restart_target: Path) -> str:
+def _build_update_helper_script(installer_path: Path, restart_target: Path, ready_flag: Path) -> str:
     installer = str(installer_path).replace("'", "''")
     restart = str(restart_target).replace("'", "''")
+    ready = str(ready_flag).replace("'", "''")
     return f"""
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+
+Set-Content -Path '{ready}' -Value 'ready'
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'B2B Serv'
@@ -148,3 +157,14 @@ $timer.Start()
 
 [void]$form.ShowDialog()
 """
+
+
+def _wait_for_ready_flag(ready_flag: Path, process: subprocess.Popen[bytes | str], timeout: float = 8.0) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if ready_flag.exists():
+            return
+        if process.poll() is not None:
+            break
+        time.sleep(0.1)
+    raise RuntimeError("Le module de mise a jour ne s'est pas lance correctement.")
