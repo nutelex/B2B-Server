@@ -13,6 +13,7 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=installer-dist
 OutputBaseFilename=B2B-Serv-Installer
+SetupIconFile=app-icon.ico
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
@@ -23,15 +24,13 @@ CloseApplications=yes
 [Languages]
 Name: "french"; MessagesFile: "compiler:Languages\\French.isl"
 
-[Tasks]
-Name: "desktopicon"; Description: "Creer un raccourci sur le Bureau"; GroupDescription: "Raccourcis :"
-
 [Files]
 Source: "dist\\B2B Serv\\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "app-icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"
-Name: "{autodesktop}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autoprograms}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"; IconFilename: "{app}\\app-icon.ico"
+Name: "{autodesktop}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"; IconFilename: "{app}\\app-icon.ico"
 
 [Run]
 Filename: "{app}\\{#MyAppExeName}"; Description: "Lancer {#MyAppName}"; Flags: nowait postinstall skipifsilent

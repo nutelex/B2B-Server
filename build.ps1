@@ -21,6 +21,7 @@ pyinstaller `
     --noconfirm `
     --windowed `
     --name "B2B Serv" `
+    --icon "app-icon.ico" `
     --add-binary "$cloudflared;." `
     --add-data "$tclRoot;tcl" `
     main.py
