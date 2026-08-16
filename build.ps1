@@ -1,0 +1,29 @@
+$ErrorActionPreference = "Stop"
+
+$root = Split-Path -Parent $MyInvocation.MyCommand.Path
+Set-Location $root
+
+$cloudflared = (Get-Command cloudflared.exe -ErrorAction Stop).Source
+$pythonDir = Split-Path -Parent (Get-Command python.exe -ErrorAction Stop).Source
+$tclRoot = Join-Path $pythonDir "tcl"
+$distDir = Join-Path $root "dist"
+$buildDir = Join-Path $root "build"
+
+if (Test-Path $distDir) {
+    Remove-Item -Recurse -Force $distDir
+}
+
+if (Test-Path $buildDir) {
+    Remove-Item -Recurse -Force $buildDir
+}
+
+pyinstaller `
+    --noconfirm `
+    --windowed `
+    --name "B2B Serv" `
+    --add-binary "$cloudflared;." `
+    --add-data "$tclRoot;tcl" `
+    main.py
+
+Write-Host ""
+Write-Host "Export termine dans:" (Join-Path $distDir "B2B Serv")
