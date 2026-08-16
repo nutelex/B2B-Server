@@ -27,16 +27,16 @@ class SessionEngine:
         self.peer_name = ""
         self._poll_thread: Optional[threading.Thread] = None
 
-    def create_session(self, username: str, relay_base_url: str) -> tuple[str, str]:
+    def create_session(self, username: str, local_relay_base_url: str, public_relay_url: str) -> tuple[str, str]:
         self.stop()
         self.role = "host"
         self.sender_name = username
-        self.relay_base_url = relay_base_url.rstrip("/")
+        self.relay_base_url = local_relay_base_url.rstrip("/")
         self.code = generate_code()
         self._post("/host", {"name": username, "code": self.code})
         self.running = True
         self._start_polling()
-        return self.code, encode_link(self.relay_base_url, 443, self.code)
+        return self.code, encode_link(public_relay_url.rstrip("/"), 443, self.code)
 
     def join_session(self, username: str, relay_base_url: str, code: str) -> None:
         self.stop()

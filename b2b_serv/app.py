@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlparse
 
 from relay_server import LocalRelayServer
 
+from .logging_utils import append_log, log_file_path, read_logs
 from .models import SessionState
 from .network import SessionEngine
 from .runtime import launch_uninstaller
@@ -44,10 +45,13 @@ class B2BServApp:
         self.log_text: tk.Text
         self.create_button: ttk.Button
         self.join_button: ttk.Button
+        self.log_window: tk.Toplevel | None = None
+        self.log_window_text: tk.Text | None = None
 
         self._build_ui()
         self.root.after(1200, self._check_updates_async)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._log(f"Application demarree en version {__version__}")
 
     def _build_ui(self) -> None:
         self.root.configure(bg="#0d1016")
@@ -98,6 +102,7 @@ class B2BServApp:
         self.join_button = ttk.Button(actions, text="Rejoindre une session", command=self.join_session_flow, style="Big.TButton")
         self.join_button.grid(row=0, column=1, sticky="ew", padx=(8, 0))
         ttk.Button(action_card, text="Desinstaller l'application", command=self.uninstall_app).pack(anchor="w", pady=(14, 0))
+        ttk.Button(action_card, text="Ouvrir les logs", command=self.open_logs_window).pack(anchor="w", pady=(10, 0))
 
         ttk.Label(
             action_card,
@@ -181,10 +186,15 @@ class B2BServApp:
 
     def _create_session_worker(self, username: str) -> None:
         try:
+            self._log(f"Debut creation session pour {username}")
             self.local_relay = LocalRelayServer(host=LOCAL_RELAY_HOST, port=LOCAL_RELAY_PORT)
             self.local_relay.start()
             public_url = self.tunnel.start(LOCAL_RELAY_PORT)
-            code, link = self.engine.create_session(username, public_url)
+            code, link = self.engine.create_session(
+                username=username,
+                local_relay_base_url=f"http://{LOCAL_RELAY_HOST}:{LOCAL_RELAY_PORT}",
+                public_relay_url=public_url,
+            )
             self.root.after(0, lambda: self._on_session_created(username, public_url, code, link))
         except Exception as exc:
             message = str(exc) or repr(exc) or "Erreur inconnue pendant la creation de session."
@@ -227,6 +237,7 @@ class B2BServApp:
         try:
             self.engine.join_session(username, relay_url, code)
         except Exception as exc:
+            self._log(f"Echec connexion guest a {relay_url} pour le code {code}: {exc}")
             messagebox.showerror("Connexion impossible", str(exc))
             return
 
@@ -272,6 +283,7 @@ class B2BServApp:
         self.root.after(0, lambda: self._handle_event_on_ui(event, payload))
 
     def _handle_event_on_ui(self, event: str, payload: dict) -> None:
+        self._log(f"Evenement recu: {event} {payload}")
         if event == "approval_needed":
             self.hero_var.set("Validation requise")
             self.status_var.set("Un DJ veut rejoindre ta session.")
@@ -382,13 +394,62 @@ class B2BServApp:
         self.join_button.configure(state=state)
 
     def _log(self, message: str) -> None:
+        timestamped = append_log(message)
         self.log_text.configure(state="normal")
-        self.log_text.insert("end", message + "\n")
+        self.log_text.insert("end", timestamped + "\n")
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
+        if self.log_window_text:
+            self.log_window_text.configure(state="normal")
+            self.log_window_text.insert("end", timestamped + "\n")
+            self.log_window_text.see("end")
+            self.log_window_text.configure(state="disabled")
 
     def _log_tunnel(self, message: str) -> None:
         self.root.after(0, lambda: self._log(f"Tunnel: {message}"))
+
+    def open_logs_window(self) -> None:
+        if self.log_window and self.log_window.winfo_exists():
+            self.log_window.lift()
+            return
+        self.log_window = tk.Toplevel(self.root)
+        self.log_window.title("Logs B2B Serv")
+        self.log_window.geometry("900x520")
+        self.log_window.configure(bg="#0d1016")
+        header = ttk.Frame(self.log_window, padding=14)
+        header.pack(fill="x")
+        ttk.Label(header, text=f"Fichier log : {log_file_path()}", font=("Segoe UI", 10)).pack(anchor="w")
+        actions = ttk.Frame(header)
+        actions.pack(anchor="w", pady=(10, 0))
+        ttk.Button(actions, text="Rafraichir", command=self.refresh_logs_window).pack(side="left")
+        ttk.Button(actions, text="Copier les logs", command=self.copy_logs).pack(side="left", padx=(8, 0))
+        body = ttk.Frame(self.log_window, padding=(14, 0, 14, 14))
+        body.pack(fill="both", expand=True)
+        self.log_window_text = tk.Text(
+            body,
+            bg="#0a0e14",
+            fg="#eef2ff",
+            insertbackground="white",
+            relief="flat",
+            font=("Consolas", 10),
+        )
+        self.log_window_text.pack(fill="both", expand=True)
+        self.refresh_logs_window()
+
+    def refresh_logs_window(self) -> None:
+        if not self.log_window_text:
+            return
+        self.log_window_text.configure(state="normal")
+        self.log_window_text.delete("1.0", "end")
+        self.log_window_text.insert("end", read_logs())
+        self.log_window_text.see("end")
+        self.log_window_text.configure(state="disabled")
+
+    def copy_logs(self) -> None:
+        logs = read_logs()
+        self.root.clipboard_clear()
+        self.root.clipboard_append(logs)
+        self.status_var.set("Logs copies dans le presse-papiers.")
 
     def _parse_link(self, link: str) -> tuple[str, int, str]:
         parsed = urlparse(link)
