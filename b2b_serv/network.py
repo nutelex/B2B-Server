@@ -26,6 +26,7 @@ class SessionEngine:
         self.relay_base_url = ""
         self.peer_name = ""
         self._poll_thread: Optional[threading.Thread] = None
+        self._ping_sent_at = 0.0
 
     def create_session(self, username: str, local_relay_base_url: str, public_relay_url: str) -> tuple[str, str]:
         self.stop()
@@ -101,6 +102,39 @@ class SessionEngine:
             },
         )
 
+    def send_ping(self) -> None:
+        if not self.running or not self.code:
+            return
+        self._ping_sent_at = time.time()
+        self._post(
+            "/control",
+            {
+                "code": self.code,
+                "role": self.role,
+                "event": {
+                    "from": self.sender_name,
+                    "system": "ping",
+                    "sent_at": self._ping_sent_at,
+                },
+            },
+        )
+
+    def send_pong(self, sent_at: float) -> None:
+        if not self.running or not self.code:
+            return
+        self._post(
+            "/control",
+            {
+                "code": self.code,
+                "role": self.role,
+                "event": {
+                    "from": self.sender_name,
+                    "system": "pong",
+                    "sent_at": sent_at,
+                },
+            },
+        )
+
     def stop(self) -> None:
         self.running = False
         self.peer_name = ""
@@ -112,8 +146,11 @@ class SessionEngine:
     def _poll_loop(self) -> None:
         while self.running:
             try:
+                started_at = time.time()
                 query = parse.urlencode({"code": self.code, "role": self.role})
                 result = self._get(f"/poll?{query}")
+                latency_ms = round((time.time() - started_at) * 1000)
+                self.on_event("connection_quality", {"latency_ms": latency_ms})
                 for event in result.get("events", []):
                     self._handle_message(event["kind"], event.get("payload", {}))
             except Exception as exc:
@@ -140,6 +177,24 @@ class SessionEngine:
                     {
                         "name": payload.get("from", "Remote DJ"),
                         "controller_name": payload["controller_name"],
+                    },
+                )
+            elif payload.get("system") == "ping":
+                self.on_event(
+                    "network_ping",
+                    {
+                        "name": payload.get("from", "Remote DJ"),
+                        "sent_at": payload.get("sent_at", 0.0),
+                    },
+                )
+            elif payload.get("system") == "pong":
+                sent_at = float(payload.get("sent_at", 0.0) or 0.0)
+                latency_ms = round((time.time() - sent_at) * 1000) if sent_at else 0
+                self.on_event(
+                    "network_pong",
+                    {
+                        "name": payload.get("from", "Remote DJ"),
+                        "latency_ms": latency_ms,
                     },
                 )
             elif "midi" in payload:

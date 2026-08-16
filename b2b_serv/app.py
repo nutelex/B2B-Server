@@ -12,13 +12,14 @@ from .logging_utils import append_log, log_file_path, read_logs
 from .midi_bridge import MidiBridge
 from .models import SessionState
 from .network import SessionEngine
-from .runtime import launch_uninstaller
+from .runtime import detect_windows_dj_controllers, launch_uninstaller, load_settings, save_settings
 from .tunnel import CloudflaredTunnel
 from .updater import check_for_update, download_and_launch_update
 from .version import __version__
 
 LOCAL_RELAY_HOST = "127.0.0.1"
 LOCAL_RELAY_PORT = 47000
+AUTO_REFRESH_MS = 5000
 
 
 class B2BServApp:
@@ -34,22 +35,31 @@ class B2BServApp:
         self.local_relay: LocalRelayServer | None = None
         self.tunnel = CloudflaredTunnel(self._log_tunnel)
         self.is_busy = False
+        self.settings = load_settings()
 
-        self.username_var = tk.StringVar(value="Mon blaze DJ")
+        self.username_var = tk.StringVar(value=self.settings.get("username", "Mon blaze DJ"))
         self.code_var = tk.StringVar(value="------")
         self.link_var = tk.StringVar(value="Le lien apparaitra ici")
         self.status_var = tk.StringVar(value="Choisis une action pour commencer.")
         self.hero_var = tk.StringVar(value=f"Session inactive - v{__version__}")
         self.network_var = tk.StringVar(value="Le host cree automatiquement son serveur et son tunnel.")
-        self.profile_var = tk.StringVar(value="VirtualDJ")
-        self.midi_input_var = tk.StringVar(value="")
-        self.midi_output_var = tk.StringVar(value="")
+        self.profile_var = tk.StringVar(value=self.settings.get("profile", "VirtualDJ"))
+        self.midi_input_var = tk.StringVar(value=self.settings.get("midi_input", ""))
+        self.midi_output_var = tk.StringVar(value=self.settings.get("midi_output", ""))
         self.midi_status_var = tk.StringVar(value="MIDI inactif.")
         self.setup_hint_var = tk.StringVar(
             value="Mode VirtualDJ : active ton controleur ici, puis le receveur choisit la sortie MIDI recommandee."
         )
         self.local_controller_var = tk.StringVar(value="Controleur local : aucun")
         self.remote_controller_var = tk.StringVar(value="Controleur distant : inconnu")
+        self.connection_quality_var = tk.StringVar(value="Qualite reseau : inconnue")
+        self.connection_ms_var = tk.StringVar(value="-- ms")
+        self.last_test_var = tk.StringVar(value="Dernier test : aucun")
+        self.last_action_var = tk.StringVar(value="Derniere action distante : aucune")
+        self.local_test_var = tk.StringVar(value="Test local : non lance")
+        self.detected_hardware_controllers: list[str] = []
+        self.connection_quality_label: ttk.Label
+        self.connection_ms_label: ttk.Label
 
         self.play_vars: dict[str, tk.StringVar] = {}
         self.volume_vars: dict[str, tk.DoubleVar] = {}
@@ -65,6 +75,7 @@ class B2BServApp:
         self._build_ui()
         self.root.after(1200, self._check_updates_async)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.username_var.trace_add("write", lambda *_: self._save_settings())
         self._log(f"Application demarree en version {__version__}")
 
     def _build_ui(self) -> None:
@@ -166,11 +177,24 @@ class B2BServApp:
         ttk.Button(midi_actions, text="Rafraichir les ports", command=self.refresh_midi_ports).pack(side="left")
         ttk.Button(midi_actions, text="Activer le controleur", command=self.activate_midi).pack(side="left", padx=(8, 0))
         ttk.Button(midi_actions, text="Appliquer la sortie distante", command=self.apply_midi_output).pack(side="left", padx=(8, 0))
+        ttk.Button(midi_actions, text="Test local", command=self.run_local_test).pack(side="left", padx=(8, 0))
+        ttk.Button(midi_actions, text="Test reseau", command=self.run_network_test).pack(side="left", padx=(8, 0))
         ttk.Button(midi_actions, text="Couper le MIDI", command=self.disable_midi).pack(side="left", padx=(8, 0))
         ttk.Label(midi_card, textvariable=self.midi_status_var, style="Muted.TLabel", wraplength=920).grid(row=5, column=0, columnspan=3, sticky="w", pady=(14, 0))
         ttk.Label(midi_card, textvariable=self.setup_hint_var, style="Muted.TLabel", wraplength=920).grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
         ttk.Label(midi_card, textvariable=self.local_controller_var, style="Muted.TLabel", wraplength=920).grid(row=7, column=0, columnspan=3, sticky="w", pady=(8, 0))
         ttk.Label(midi_card, textvariable=self.remote_controller_var, style="Muted.TLabel", wraplength=920).grid(row=8, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        ttk.Label(midi_card, textvariable=self.local_test_var, style="Muted.TLabel", wraplength=920).grid(row=9, column=0, columnspan=3, sticky="w", pady=(4, 0))
+
+        diagnostic_card = ttk.Frame(outer, style="Panel.TFrame", padding=22)
+        diagnostic_card.pack(fill="x", pady=(18, 0))
+        ttk.Label(diagnostic_card, text="Diagnostic session", style="Panel.TLabel", font=("Segoe UI", 14, "bold")).grid(row=0, column=0, sticky="w")
+        self.connection_quality_label = ttk.Label(diagnostic_card, textvariable=self.connection_quality_var, style="Panel.TLabel", font=("Segoe UI", 12, "bold"))
+        self.connection_quality_label.grid(row=1, column=0, sticky="w", pady=(12, 0))
+        self.connection_ms_label = ttk.Label(diagnostic_card, textvariable=self.connection_ms_var, style="Panel.TLabel", font=("Consolas", 12, "bold"))
+        self.connection_ms_label.grid(row=1, column=1, sticky="w", padx=(18, 0), pady=(12, 0))
+        ttk.Label(diagnostic_card, textvariable=self.last_test_var, style="Muted.TLabel", wraplength=920).grid(row=2, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        ttk.Label(diagnostic_card, textvariable=self.last_action_var, style="Muted.TLabel", wraplength=920).grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
 
         decks = ttk.Frame(outer)
         decks.pack(fill="both", expand=True, pady=(18, 0))
@@ -196,6 +220,8 @@ class B2BServApp:
         self.log_text.configure(state="disabled")
         self.refresh_midi_ports()
         self.optimize_for_virtualdj(initial=True)
+        self._apply_connection_quality("inconnue", 0)
+        self._schedule_auto_refresh()
 
     def _build_deck_panel(self, parent: ttk.Frame, deck: str, column: int) -> None:
         card = ttk.Frame(parent, style="Panel.TFrame", padding=20)
@@ -258,6 +284,7 @@ class B2BServApp:
         self.status_var.set("Partage le code ou le lien. Le tunnel est actif.")
         self.network_var.set(f"Tunnel public actif : {public_url}")
         self._share_controller_name()
+        self.last_test_var.set("Dernier test : session locale creee")
         self._log(f"Session creee par {username}")
         self._set_busy(False)
 
@@ -300,6 +327,7 @@ class B2BServApp:
         self.status_var.set("Demande envoyee. En attente de validation.")
         self.network_var.set(f"Connexion au host via {relay_url}")
         self.remote_controller_var.set("Controleur distant : en attente de connexion")
+        self.last_test_var.set("Dernier test : connexion guest en attente")
         self._log(f"{username} tente de rejoindre la session {code}")
 
     def copy_code(self) -> None:
@@ -358,6 +386,7 @@ class B2BServApp:
             if self.profile_var.get() == "VirtualDJ":
                 self._auto_prepare_virtualdj_output()
             self._share_controller_name()
+            self.last_test_var.set(f"Dernier test : session active avec {payload['name']}")
             self._log(f"Session active avec {payload['name']}")
         elif event == "join_rejected":
             self.hero_var.set("Connexion refusee")
@@ -371,22 +400,34 @@ class B2BServApp:
             deck = payload["deck"]
             text = f"Action distante de {payload['name']}: {payload['control']} -> {payload['value']}"
             self.remote_status_vars[deck].set(text)
+            self.last_action_var.set(text)
             if payload["control"] == "play":
                 state = "ON" if payload["value"] >= 0.5 else "OFF"
                 self.play_vars[deck].set(f"Play distant recu: {state}")
             elif payload["control"] == "volume":
                 self.volume_vars[deck].set(payload["value"])
             self._log(f"Remote {deck}: {payload['control']} -> {payload['value']}")
+        elif event == "network_ping":
+            self.engine.send_pong(float(payload.get("sent_at", 0.0) or 0.0))
+        elif event == "network_pong":
+            latency_ms = int(payload.get("latency_ms", 0) or 0)
+            self.last_test_var.set(f"Dernier test reseau : {latency_ms} ms avec {payload['name']}")
+            self._apply_connection_quality(self._quality_name(latency_ms), latency_ms)
+        elif event == "connection_quality":
+            latency_ms = int(payload.get("latency_ms", 0) or 0)
+            self._apply_connection_quality(self._quality_name(latency_ms), latency_ms)
         elif event == "remote_midi":
             message = payload["message"]
             self.midi_bridge.send_remote_message(message)
             summary = self._format_midi_message(message)
             self.midi_status_var.set(f"MIDI distant recu de {payload['name']} : {summary}")
+            self.last_action_var.set(f"Dernier MIDI distant : {summary}")
             self._log(f"MIDI distant {payload['name']}: {summary}")
         elif event == "connection_error":
             self.hero_var.set("Erreur reseau")
             self.status_var.set("Impossible de maintenir la connexion.")
             self.network_var.set("La session reseau a rencontre une erreur.")
+            self._apply_connection_quality("erreur", 0)
             self._log(payload["message"])
 
     def _check_updates_async(self) -> None:
@@ -518,6 +559,23 @@ class B2BServApp:
         self.root.clipboard_append(logs)
         self.status_var.set("Logs copies dans le presse-papiers.")
 
+    def run_local_test(self) -> None:
+        self.refresh_midi_ports()
+        local_name = self.local_controller_var.get().replace("Controleur local : ", "", 1)
+        midi_name = self.midi_input_var.get().strip() or "aucune entree MIDI"
+        result = f"Test local : controleur={local_name}, entree MIDI={midi_name}"
+        self.local_test_var.set(result)
+        self.last_test_var.set(result)
+        self._log(result)
+
+    def run_network_test(self) -> None:
+        if not self.engine.running:
+            messagebox.showinfo("Test reseau", "Connecte une session avant de lancer le test reseau.")
+            return
+        self.last_test_var.set("Dernier test reseau : en cours...")
+        self.engine.send_ping()
+        self._log("Test reseau manuel lance")
+
     def optimize_for_virtualdj(self, initial: bool = False) -> None:
         self.profile_var.set("VirtualDJ")
         self.refresh_midi_ports()
@@ -538,6 +596,7 @@ class B2BServApp:
         if not initial:
             self.status_var.set("Profil VirtualDJ applique.")
             self._log("Profil VirtualDJ applique")
+        self._save_settings()
 
     def open_virtualdj_guide(self) -> None:
         messagebox.showinfo(
@@ -552,12 +611,13 @@ class B2BServApp:
         )
 
     def refresh_midi_ports(self) -> None:
+        self.detected_hardware_controllers = detect_windows_dj_controllers()
         snapshot = self.midi_bridge.list_ports()
         if not self.midi_bridge.available:
             self.midi_input_combo["values"] = []
             self.midi_output_combo["values"] = []
             self.midi_status_var.set("Support MIDI indisponible dans cette installation. Reinstalle la derniere mise a jour si besoin.")
-            self.local_controller_var.set("Controleur local : indisponible")
+            self._update_local_controller_name("")
             return
         self.midi_input_combo["values"] = snapshot.inputs
         self.midi_output_combo["values"] = [""] + snapshot.outputs
@@ -578,6 +638,7 @@ class B2BServApp:
             recommended = self._find_virtualdj_output(snapshot.outputs)
             if recommended and not self.midi_output_var.get():
                 self.midi_output_var.set(recommended)
+        self._save_settings()
 
     def activate_midi(self) -> None:
         port_name = self.midi_input_var.get().strip()
@@ -589,6 +650,8 @@ class B2BServApp:
             self.midi_status_var.set(f"Controleur actif : {port_name}")
             self._update_local_controller_name(port_name)
             self._share_controller_name()
+            self.local_test_var.set(f"Test local : entree active sur {port_name}")
+            self._save_settings()
             self._log(f"Capture MIDI active sur {port_name}")
         except Exception as exc:
             self.midi_status_var.set("Impossible d'activer le controleur.")
@@ -599,6 +662,7 @@ class B2BServApp:
         port_name = self.midi_output_var.get().strip()
         try:
             self._try_apply_midi_output(port_name)
+            self._save_settings()
         except Exception as exc:
             self._log(f"Echec sortie MIDI: {exc}")
             messagebox.showerror("Sortie MIDI impossible", str(exc))
@@ -608,6 +672,8 @@ class B2BServApp:
         self.midi_status_var.set("MIDI coupe.")
         self._update_local_controller_name("")
         self._share_controller_name()
+        self.local_test_var.set("Test local : MIDI coupe")
+        self._save_settings()
         self._log("Pont MIDI coupe")
 
     def _on_local_midi_message(self, message: dict) -> None:
@@ -701,13 +767,83 @@ class B2BServApp:
             return direct_match.group(1).strip().rstrip("/")
         return raw_link.strip()
 
+    def _schedule_auto_refresh(self) -> None:
+        self.root.after(AUTO_REFRESH_MS, self._run_auto_refresh)
+
+    def _run_auto_refresh(self) -> None:
+        threading.Thread(target=self._auto_refresh_worker, daemon=True).start()
+        self._schedule_auto_refresh()
+
+    def _auto_refresh_worker(self) -> None:
+        previous_local = self.local_controller_var.get()
+        hardware = detect_windows_dj_controllers()
+        snapshot = self.midi_bridge.list_ports()
+        self.root.after(0, lambda h=hardware, s=snapshot, p=previous_local: self._apply_auto_refresh_result(h, s, p))
+
+    def _apply_auto_refresh_result(self, hardware: list[str], snapshot, previous_local: str) -> None:
+        self.detected_hardware_controllers = hardware
+        self.midi_input_combo["values"] = snapshot.inputs
+        self.midi_output_combo["values"] = [""] + snapshot.outputs
+        recommended_input = self._find_preferred_input(snapshot.inputs)
+        if recommended_input:
+            self.midi_input_var.set(recommended_input)
+        elif snapshot.inputs and not self.midi_input_var.get():
+            self.midi_input_var.set(snapshot.inputs[0])
+        if snapshot.outputs and not self.midi_output_var.get():
+            self.midi_output_var.set(snapshot.outputs[0])
+        self._update_local_controller_name(self.midi_input_var.get().strip())
+        if self.local_controller_var.get() != previous_local:
+            self._share_controller_name()
+            self._log(f"Auto-refresh controleur: {self.local_controller_var.get()}")
+        self._save_settings()
+
+    def _apply_connection_quality(self, quality: str, latency_ms: int) -> None:
+        colors = {
+            "excellente": "#48d597",
+            "bonne": "#7ad66f",
+            "moyenne": "#f6c85f",
+            "faible": "#ff8c42",
+            "erreur": "#ff5f5f",
+            "inconnue": "#7f8aa3",
+        }
+        color = colors.get(quality, "#7f8aa3")
+        self.connection_quality_var.set(f"Qualite reseau : {quality.capitalize()}")
+        self.connection_ms_var.set(f"{latency_ms if latency_ms else '--'} ms")
+        self.connection_quality_label.configure(foreground=color)
+        self.connection_ms_label.configure(foreground=color)
+
+    def _quality_name(self, latency_ms: int) -> str:
+        if latency_ms <= 0:
+            return "inconnue"
+        if latency_ms <= 80:
+            return "excellente"
+        if latency_ms <= 150:
+            return "bonne"
+        if latency_ms <= 260:
+            return "moyenne"
+        return "faible"
+
     def _update_local_controller_name(self, port_name: str) -> None:
-        controller_name = port_name or "aucun"
+        controller_name = port_name.strip()
+        if not controller_name and self.detected_hardware_controllers:
+            controller_name = self.detected_hardware_controllers[0]
+        if not controller_name:
+            controller_name = "aucun"
         self.local_controller_var.set(f"Controleur local : {controller_name}")
 
     def _share_controller_name(self) -> None:
-        controller_name = self.midi_input_var.get().strip() or "aucun"
+        controller_name = self.local_controller_var.get().replace("Controleur local : ", "", 1).strip() or "aucun"
         self.engine.send_controller_name(controller_name)
+
+    def _save_settings(self) -> None:
+        save_settings(
+            {
+                "username": self.username_var.get().strip(),
+                "profile": self.profile_var.get().strip(),
+                "midi_input": self.midi_input_var.get().strip(),
+                "midi_output": self.midi_output_var.get().strip(),
+            }
+        )
 
     def _parse_link(self, link: str) -> tuple[str, int, str]:
         parsed = urlparse(link)
@@ -723,6 +859,7 @@ class B2BServApp:
         self.midi_bridge.shutdown()
         self.local_controller_var.set("Controleur local : aucun")
         self.remote_controller_var.set("Controleur distant : inconnu")
+        self.last_action_var.set("Derniere action distante : aucune")
         self.tunnel.stop()
         if self.local_relay:
             self.local_relay.stop()

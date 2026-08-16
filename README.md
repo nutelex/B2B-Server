@@ -22,6 +22,7 @@ Repo GitHub : `https://github.com/nutelex/B2B-Server`
 - le profil `VirtualDJ` reduit la configuration avec une sortie MIDI recommandee et un assistant integre
 - les liens de session mal copies sont maintenant nettoyes automatiquement au collage
 - l'application affiche maintenant le controleur detecte localement et celui detecte chez l'autre DJ
+- auto-refresh des controleurs, test local/reseau, memoire des ports et qualite de connexion avec indicateur colore
 
 ## Lancer en developpement
 
