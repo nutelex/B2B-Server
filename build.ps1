@@ -3,7 +3,12 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $root
 
-$cloudflared = (Get-Command cloudflared.exe -ErrorAction Stop).Source
+$localCloudflared = Join-Path $root "cloudflared.exe"
+if (Test-Path $localCloudflared) {
+    $cloudflared = $localCloudflared
+} else {
+    $cloudflared = (Get-Command cloudflared.exe -ErrorAction Stop).Source
+}
 $pythonDir = Split-Path -Parent (Get-Command python.exe -ErrorAction Stop).Source
 $tclRoot = Join-Path $pythonDir "tcl"
 $distDir = Join-Path $root "dist"
