@@ -16,8 +16,8 @@ Repo GitHub : `https://github.com/nutelex/B2B-Server`
 ## Mises a jour
 
 - l'application verifie au demarrage si une nouvelle release GitHub existe
-- si une nouvelle version est disponible, elle propose d'ouvrir la page de telechargement
-- les builds Windows sont prepares automatiquement par GitHub Actions
+- si une nouvelle version est disponible, elle peut telecharger et lancer automatiquement `Installer.exe`
+- les builds Windows et l'installateur sont prepares automatiquement par GitHub Actions
 
 ## Lancer en developpement
 
@@ -46,6 +46,7 @@ Le workflow [release.yml](C:\Users\FLOWUP\Desktop\bot_sf1x\B2B%20Serv\.github\wo
 - build l'application Windows
 - embarque `cloudflared.exe`
 - cree une archive `.zip`
+- cree `B2B-Serv-Installer.exe`
 - publie automatiquement la release quand tu pousses un tag `v*`
 
 Exemple :
@@ -74,9 +75,11 @@ Cette version est prete pour :
 - build Windows local
 - release GitHub automatisee
 - verification de mise a jour au lancement
+- installateur Windows telechargeable
+- mise a jour qui lance automatiquement l'installateur
 
 Limites restantes :
 
 - transport HTTP avec polling
 - pas encore de vrai passthrough MIDI/HID vers Serato, rekordbox, Traktor ou VirtualDJ
-- pas encore d'installateur Windows complet type Inno Setup ou MSI
+- pas encore de mise a jour delta ou silencieuse sans relancer l'installateur

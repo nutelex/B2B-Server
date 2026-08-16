@@ -30,25 +30,39 @@ jobs:
         run: |
           Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe"
 
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+
       - name: Build app
         shell: pwsh
         run: |
           .\build.ps1
 
-      - name: Zip release folder
+      - name: Build installer
         shell: pwsh
         run: |
-          Compress-Archive -Path ".\dist\B2B Serv\*" -DestinationPath ".\B2B-Serv-windows.zip" -Force
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" .\installer.iss
 
-      - name: Upload artifact
+      - name: Zip portable build
+        shell: pwsh
+        run: |
+          Compress-Archive -Path ".\dist\B2B Serv\*" -DestinationPath ".\B2B-Serv-windows-portable.zip" -Force
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: B2B-Serv-windows
-          path: B2B-Serv-windows.zip
+          path: |
+            B2B-Serv-windows-portable.zip
+            installer-dist\B2B-Serv-Installer.exe
 
-      - name: Publish release asset
+      - name: Publish release assets
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: B2B-Serv-windows.zip
+          files: |
+            B2B-Serv-windows-portable.zip
+            installer-dist\B2B-Serv-Installer.exe
           generate_release_notes: true

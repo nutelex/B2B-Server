@@ -4,14 +4,13 @@ import threading
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 from urllib.parse import parse_qs, urlparse
-import webbrowser
 
 from relay_server import LocalRelayServer
 
 from .models import SessionState
 from .network import SessionEngine
 from .tunnel import CloudflaredTunnel
-from .updater import check_for_update
+from .updater import check_for_update, download_and_launch_update
 from .version import __version__
 
 LOCAL_RELAY_HOST = "127.0.0.1"
@@ -318,12 +317,39 @@ class B2BServApp:
 
     def _show_update_notice(self, update: dict) -> None:
         self.network_var.set(f"Nouvelle version disponible : {update['latest_version']}")
-        should_open = messagebox.askyesno(
+        should_install = messagebox.askyesno(
             "Mise a jour disponible",
-            f"Une nouvelle version ({update['latest_version']}) est disponible.\nOuvrir la page de telechargement ?",
+            f"Une nouvelle version ({update['latest_version']}) est disponible.\nTelecharger et installer maintenant ?",
         )
-        if should_open:
-            webbrowser.open(update["html_url"])
+        if should_install:
+            self._install_update_async(update)
+
+    def _install_update_async(self, update: dict) -> None:
+        if self.is_busy:
+            return
+        self._set_busy(True)
+        self.hero_var.set("Mise a jour en cours")
+        self.status_var.set("Telechargement de l'installateur...")
+        threading.Thread(target=self._install_update_worker, args=(update,), daemon=True).start()
+
+    def _install_update_worker(self, update: dict) -> None:
+        try:
+            download_and_launch_update(update["installer_url"], update["installer_name"])
+            self.root.after(0, self._on_update_started)
+        except Exception as exc:
+            self.root.after(0, lambda: self._on_update_failed(str(exc)))
+
+    def _on_update_started(self) -> None:
+        self._set_busy(False)
+        self.status_var.set("Installateur lance. Ferme l'app si besoin pendant la mise a jour.")
+        self.network_var.set("La mise a jour automatique a ete demarree.")
+
+    def _on_update_failed(self, message: str) -> None:
+        self._set_busy(False)
+        self.hero_var.set(f"Session inactive - v{__version__}")
+        self.status_var.set("La mise a jour automatique a echoue.")
+        self.network_var.set("Essaie de telecharger la release manuellement si besoin.")
+        messagebox.showerror("Mise a jour impossible", message)
 
     def _set_busy(self, busy: bool) -> None:
         self.is_busy = busy
