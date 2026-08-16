@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -65,6 +66,7 @@ def download_and_launch_update(installer_url: str, installer_name: str) -> Path:
     temp_dir = Path(tempfile.gettempdir()) / "B2BServUpdater"
     temp_dir.mkdir(parents=True, exist_ok=True)
     target = temp_dir / (installer_name or "B2B-Serv-Installer.exe")
+    helper = temp_dir / "run_update.ps1"
 
     req = request.Request(
         installer_url,
@@ -77,12 +79,23 @@ def download_and_launch_update(installer_url: str, installer_name: str) -> Path:
     except error.URLError as exc:
         raise RuntimeError("Telechargement de la mise a jour impossible.") from exc
 
+    restart_target = Path(sys.executable).resolve()
+    helper.write_text(
+        _build_update_helper_script(target, restart_target),
+        encoding="utf-8",
+    )
+
     subprocess.Popen(
-        [str(target), "/VERYSILENT", "/NORESTART", "/CLOSEAPPLICATIONS"],
+        [
+            "powershell.exe",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(helper),
+        ],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     return target
 
@@ -93,3 +106,45 @@ def _find_installer_asset(assets: list[dict[str, Any]]) -> dict[str, Any] | None
         if name.endswith("installer.exe"):
             return asset
     return None
+
+
+def _build_update_helper_script(installer_path: Path, restart_target: Path) -> str:
+    installer = str(installer_path).replace("'", "''")
+    restart = str(restart_target).replace("'", "''")
+    return f"""
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+$form = New-Object System.Windows.Forms.Form
+$form.Text = 'B2B Serv'
+$form.Width = 420
+$form.Height = 140
+$form.StartPosition = 'CenterScreen'
+$form.FormBorderStyle = 'FixedDialog'
+$form.MaximizeBox = $false
+$form.MinimizeBox = $false
+$form.TopMost = $true
+
+$label = New-Object System.Windows.Forms.Label
+$label.Left = 20
+$label.Top = 20
+$label.Width = 360
+$label.Height = 50
+$label.Text = 'Mise a jour en cours...`r`nL''application va se relancer automatiquement.'
+$form.Controls.Add($label)
+
+$installer = Start-Process -FilePath '{installer}' -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS','/FORCECLOSEAPPLICATIONS' -PassThru
+
+$timer = New-Object System.Windows.Forms.Timer
+$timer.Interval = 1000
+$timer.Add_Tick({{
+    if ($installer.HasExited) {{
+        $timer.Stop()
+        Start-Process -FilePath '{restart}'
+        $form.Close()
+    }}
+}})
+$timer.Start()
+
+[void]$form.ShowDialog()
+"""

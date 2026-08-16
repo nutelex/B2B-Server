@@ -9,6 +9,7 @@ from relay_server import LocalRelayServer
 
 from .models import SessionState
 from .network import SessionEngine
+from .runtime import launch_uninstaller
 from .tunnel import CloudflaredTunnel
 from .updater import check_for_update, download_and_launch_update
 from .version import __version__
@@ -96,6 +97,7 @@ class B2BServApp:
         self.create_button.grid(row=0, column=0, sticky="ew", padx=(0, 8))
         self.join_button = ttk.Button(actions, text="Rejoindre une session", command=self.join_session_flow, style="Big.TButton")
         self.join_button.grid(row=0, column=1, sticky="ew", padx=(8, 0))
+        ttk.Button(action_card, text="Desinstaller l'application", command=self.uninstall_app).pack(anchor="w", pady=(14, 0))
 
         ttk.Label(
             action_card,
@@ -185,7 +187,8 @@ class B2BServApp:
             code, link = self.engine.create_session(username, public_url)
             self.root.after(0, lambda: self._on_session_created(username, public_url, code, link))
         except Exception as exc:
-            self.root.after(0, lambda: self._on_create_failed(str(exc)))
+            message = str(exc) or repr(exc) or "Erreur inconnue pendant la creation de session."
+            self.root.after(0, lambda msg=message: self._on_create_failed(msg))
 
     def _on_session_created(self, username: str, public_url: str, code: str, link: str) -> None:
         self.code_var.set(code)
@@ -200,9 +203,9 @@ class B2BServApp:
         self._cleanup_host_stack()
         self.hero_var.set("Erreur reseau")
         self.status_var.set("Impossible de creer la session automatiquement.")
-        self.network_var.set("Verifie cloudflared et la connexion internet.")
+        self.network_var.set(message if message else "Verifie cloudflared et la connexion internet.")
         self._set_busy(False)
-        messagebox.showerror("Creation impossible", message)
+        messagebox.showerror("Creation impossible", message or "Erreur inconnue.")
 
     def join_session_flow(self) -> None:
         if self.is_busy:
@@ -337,12 +340,33 @@ class B2BServApp:
             download_and_launch_update(update["installer_url"], update["installer_name"])
             self.root.after(0, self._on_update_started)
         except Exception as exc:
-            self.root.after(0, lambda: self._on_update_failed(str(exc)))
+            message = str(exc) or repr(exc) or "Erreur inconnue pendant la mise a jour."
+            self.root.after(0, lambda msg=message: self._on_update_failed(msg))
 
     def _on_update_started(self) -> None:
         self._set_busy(False)
-        self.status_var.set("Installateur lance. Ferme l'app si besoin pendant la mise a jour.")
-        self.network_var.set("La mise a jour automatique a ete demarree.")
+        self.hero_var.set("Mise a jour lancee")
+        self.status_var.set("Mise a jour en cours...")
+        self.network_var.set("Une petite fenetre de progression a ete ouverte. L'app va se relancer automatiquement.")
+        self.root.after(800, self._close_for_update)
+
+    def _close_for_update(self) -> None:
+        self._cleanup_host_stack()
+        self.root.destroy()
+
+    def uninstall_app(self) -> None:
+        should_uninstall = messagebox.askyesno(
+            "Desinstaller B2B Serv",
+            "Veux-tu lancer la desinstallation de B2B Serv ?",
+        )
+        if not should_uninstall:
+            return
+        try:
+            launch_uninstaller()
+        except FileNotFoundError as exc:
+            messagebox.showerror("Desinstallation impossible", str(exc))
+            return
+        self.root.after(500, self._on_close)
 
     def _on_update_failed(self, message: str) -> None:
         self._set_busy(False)

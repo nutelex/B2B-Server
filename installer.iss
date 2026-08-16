@@ -1,5 +1,5 @@
 #define MyAppName "B2B Serv"
-#define MyAppVersion "0.2.2"
+#define MyAppVersion "0.2.5"
 #define MyAppPublisher "nutelex"
 #define MyAppExeName "B2B Serv.exe"
 
@@ -20,17 +20,18 @@ WizardStyle=modern
 PrivilegesRequired=lowest
 ArchitecturesInstallIn64BitMode=x64compatible
 CloseApplications=yes
+UninstallFilesDir={app}\_setup
 
 [Languages]
 Name: "french"; MessagesFile: "compiler:Languages\\French.isl"
 
 [Files]
 Source: "dist\\B2B Serv\\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "app-icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "app-icon.ico"; DestDir: "{app}\\resources"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"; IconFilename: "{app}\\app-icon.ico"
-Name: "{autodesktop}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"; IconFilename: "{app}\\app-icon.ico"
+Name: "{autoprograms}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"; IconFilename: "{app}\\resources\\app-icon.ico"
+Name: "{autodesktop}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"; IconFilename: "{app}\\resources\\app-icon.ico"
 
 [Run]
 Filename: "{app}\\{#MyAppExeName}"; Description: "Lancer {#MyAppName}"; Flags: nowait postinstall skipifsilent

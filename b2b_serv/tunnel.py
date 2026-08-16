@@ -16,6 +16,7 @@ class CloudflaredTunnel:
         self.process: Optional[subprocess.Popen[str]] = None
         self.public_url: Optional[str] = None
         self._thread: Optional[threading.Thread] = None
+        self.last_lines: list[str] = []
 
     def start(self, local_port: int, timeout: float = 20.0) -> str:
         self.stop()
@@ -42,8 +43,9 @@ class CloudflaredTunnel:
                 break
             time.sleep(0.1)
 
+        details = self._build_error_details()
         self.stop()
-        raise RuntimeError("Impossible d'ouvrir le tunnel automatiquement.")
+        raise RuntimeError(details)
 
     def stop(self) -> None:
         if self.process and self.process.poll() is None:
@@ -62,10 +64,22 @@ class CloudflaredTunnel:
             text = line.strip()
             if text:
                 self.on_log(text)
+                self.last_lines.append(text)
+                self.last_lines[:] = self.last_lines[-10:]
             if not self.public_url:
                 match = re.search(r"https://[a-zA-Z0-9.-]+trycloudflare\.com", text)
                 if match:
                     self.public_url = match.group(0)
+
+    def _build_error_details(self) -> str:
+        if self.process and self.process.poll() is not None:
+            code = self.process.returncode
+            if self.last_lines:
+                return f"Impossible d'ouvrir le tunnel automatiquement. Code cloudflared: {code}. Detail: {self.last_lines[-1]}"
+            return f"Impossible d'ouvrir le tunnel automatiquement. Code cloudflared: {code}."
+        if self.last_lines:
+            return f"Impossible d'ouvrir le tunnel automatiquement. Dernier message: {self.last_lines[-1]}"
+        return "Impossible d'ouvrir le tunnel automatiquement. Verifie cloudflared, la connexion internet et les restrictions reseau."
 
     def _resolve_executable(self) -> Path:
         candidates = [

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -45,3 +46,22 @@ def configure_tk_environment() -> None:
         if (path / "tk.tcl").exists():
             os.environ["TK_LIBRARY"] = str(path)
             break
+
+
+def find_uninstaller() -> Path | None:
+    base = app_base_dir()
+    candidates = [
+        base / "_setup" / "unins000.exe",
+        base / "unins000.exe",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def launch_uninstaller() -> None:
+    uninstaller = find_uninstaller()
+    if not uninstaller:
+        raise FileNotFoundError("Desinstallateur introuvable.")
+    subprocess.Popen([str(uninstaller)], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
